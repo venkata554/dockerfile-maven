@@ -56,7 +56,7 @@ package` and push it with `mvn deploy`.  Of course you can also say
 <plugin>
   <groupId>com.spotify</groupId>
   <artifactId>dockerfile-maven-plugin</artifactId>
-  <version>${version}</version>
+  <version>${dockerfile-maven-version}</version>
   <executions>
     <execution>
       <id>default</id>
@@ -69,6 +69,9 @@ package` and push it with `mvn deploy`.  Of course you can also say
   <configuration>
     <repository>spotify/foobar</repository>
     <tag>${project.version}</tag>
+    <buildArgs>
+      <JAR_FILE>${project.build.finalName}.jar</JAR_FILE>
+    </buildArgs>
   </configuration>
 </plugin>
 ```
@@ -76,7 +79,7 @@ package` and push it with `mvn deploy`.  Of course you can also say
 A corresponding `Dockerfile` could look like:
 
 ```
-FROM dockerfile/java:oracle-java8
+FROM openjdk:8-jre
 MAINTAINER David Flemström <dflemstr@spotify.com>
 
 ENTRYPOINT ["/usr/bin/java", "-jar", "/usr/share/myservice/myservice.jar"]
@@ -84,7 +87,8 @@ ENTRYPOINT ["/usr/bin/java", "-jar", "/usr/share/myservice/myservice.jar"]
 # Add Maven dependencies (not shaded into the artifact; Docker-cached)
 ADD target/lib           /usr/share/myservice/lib
 # Add the service itself
-ADD target/myservice.jar /usr/share/myservice/myservice.jar
+ARG JAR_FILE
+ADD target/${JAR_FILE} /usr/share/myservice/myservice.jar
 ```
 
 ## What does it give me?
@@ -103,9 +107,9 @@ which also greatly speeds up builds.
 You no longer have to say something like:
 
     mvn package
-    mvn docker:build
+    mvn dockerfile:build
     mvn verify
-    mvn docker:push
+    mvn dockerfile:push
     mvn deploy
 
 Instead, it is simply enough to say:
@@ -204,6 +208,17 @@ before running the plugin.
 
 [ADC]: https://developers.google.com/identity/protocols/application-default-credentials
 
+GCR users may need to initialize their Application Default Credentials via `gcloud`.
+Depending on where the plugin will run, they may wish to use [their Google
+identity][app-def-login] by running the following command
+
+    gcloud auth application-default login
+
+or [create a service account][service-acct] instead.
+
+[app-def-login]: https://cloud.google.com/sdk/gcloud/reference/auth/application-default/login
+[service-acct]: https://cloud.google.com/docs/authentication/getting-started#creating_a_service_account
+
 ## Authenticating with maven settings.xml
 
 Since version 1.3.6, you can authenticate using your maven settings.xml instead
@@ -232,3 +247,68 @@ Then, in your maven settings file, add configuration for the server:
 ```
 
 exactly as you would for any other server configuration.
+
+## Authenticating with maven pom.xml
+
+Since version 1.3.XX, you can authenticate using config from the pom itself.
+Just add configuration similar to:
+
+```xml
+ <plugin>
+    <groupId>com.spotify</groupId>
+    <artifactId>dockerfile-maven-plugin</artifactId>
+    <version>${version}</version>
+    <configuration>
+        <username>repoUserName</username>
+        <password>repoPassword</password>
+        <repository>${docker.image.prefix}/${project.artifactId}</repository>
+        <buildArgs>
+            <JAR_FILE>target/${project.build.finalName}.jar</JAR_FILE>
+        </buildArgs>
+    </configuration>
+</plugin>
+```
+or simpler, 
+```xml
+ <plugin>
+    <groupId>com.spotify</groupId>
+    <artifactId>dockerfile-maven-plugin</artifactId>
+    <version>${version}</version>
+    <configuration>
+        <repository>${docker.image.prefix}/${project.artifactId}</repository>
+        <buildArgs>
+            <JAR_FILE>target/${project.build.finalName}.jar</JAR_FILE>
+        </buildArgs>
+    </configuration>
+</plugin>
+```
+
+with this command line call
+
+    mvn goal -Ddockerfile.username=... -Ddockerfile.password=...
+    
+## Maven Goals
+
+Goals available for this plugin:
+
+| Goal      | Description    | Default Phase |
+| ---- | ---- | ---- |
+| `dockerfile:build` | Builds a Docker image from a Dockerfile. | `package` |
+| `dockerfile:tag` | Tags a Docker image. | `package` |
+| `dockerfile:push` | Pushes a Docker image to a repository. | `deploy` |
+
+## Skip Docker Goals Bound to Maven Phases
+
+You can pass options to maven to disable the docker goals.
+
+| Maven Option        | What Does _that thing_ Do?           |
+| ------------- |:-------------:|
+| dockerfile.skip | Disables the entire dockerfile plugin; all goals become no-ops. |
+| dockerfile.build.skip | Disables the build goal; it becomes a no-op. |
+| dockerfile.tag.skip | Disables the tag goal; it becomes a no-op. |
+| dockerfile.push.skip | Disables the push goal; it becomes a no-op. |
+
+For example to skip the entire dockerfile plugin:
+```
+mvn clean package -Ddockerfile.skip
+```
